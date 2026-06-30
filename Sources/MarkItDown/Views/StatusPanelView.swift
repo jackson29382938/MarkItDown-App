@@ -4,10 +4,16 @@ import SwiftUI
 struct StatusPanelView: View {
     @ObservedObject var model: AppModel
     let openSettings: () -> Void
+    let closePanel: () -> Void
 
-    init(model: AppModel, openSettings: @escaping () -> Void = {}) {
+    init(
+        model: AppModel,
+        openSettings: @escaping () -> Void = {},
+        closePanel: @escaping () -> Void = {}
+    ) {
         self.model = model
         self.openSettings = openSettings
+        self.closePanel = closePanel
     }
 
     var body: some View {
@@ -19,8 +25,8 @@ struct StatusPanelView: View {
 
             actionRow
 
-            if let runningJob = model.jobs.first(where: { $0.status == .running }) {
-                RunningJobView(job: runningJob)
+            if !model.queueJobs.isEmpty {
+                JobQueueView(model: model)
             }
 
             if !model.recentResults.isEmpty {
@@ -33,17 +39,49 @@ struct StatusPanelView: View {
 
             Divider()
             updateRow
+
+            Text(shortcutFooter)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
         .padding(16)
         .frame(width: 420)
+        .overlay(alignment: .top) {
+            if let message = model.toastMessage {
+                ToastView(message: message)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: model.toastMessage)
+        .onExitCommand(perform: closePanel)
+    }
+
+    private var shortcutFooter: String {
+        let toggle = ShortcutKind.togglePanel.load().displayString
+        let choose = ShortcutKind.chooseFiles.load().displayString
+        return "\(toggle) toggle · \(choose) choose files · Esc to close"
     }
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: model.statusSystemImage)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(model.hasAttention ? Color.orange : Color.accentColor)
-                .frame(width: 28, height: 28)
+            ZStack(alignment: .bottomTrailing) {
+                AppLogoView(height: 22)
+
+                if model.isConverting || model.hasAttention {
+                    Image(systemName: model.statusSystemImage)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(3)
+                        .background(model.hasAttention ? Color.orange : Color.accentColor, in: Circle())
+                        .offset(x: 4, y: 4)
+                }
+            }
+            .frame(
+                width: BrandImage.menuBarLogoSize(height: 22).width + 8,
+                height: 30
+            )
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("MarkItDown")
@@ -158,28 +196,6 @@ struct StatusPanelView: View {
         default:
             return .secondary
         }
-    }
-}
-
-private struct RunningJobView: View {
-    let job: ConversionJob
-
-    var body: some View {
-        HStack(spacing: 10) {
-            ProgressView()
-                .controlSize(.small)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(job.sourceURL.lastPathComponent)
-                    .font(.subheadline)
-                    .lineLimit(1)
-                Text(job.outputURL.lastPathComponent)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-        .padding(10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 

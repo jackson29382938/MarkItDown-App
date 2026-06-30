@@ -10,31 +10,47 @@ final class AppModel: ObservableObject {
     @Published private(set) var engineError: String?
     @Published private(set) var diagnostics: [DiagnosticEntry] = []
     @Published var updateStatus: EngineUpdateStatus = .idle
+    @Published private(set) var toastMessage: String?
+    @Published private(set) var shortcutConflictMessages: [ShortcutKind: String] = [:]
 
     private let conversionService: ConversionService
     private let engineManager: EngineManager
     private let engineUpdater: EngineUpdater
     private let filePanelService: FilePanelService
     private let debugLogService: DebugLogService
+    private let recentResultsStore: RecentResultsStore
     private var isDrainingQueue = false
+    private var toastTask: Task<Void, Never>?
 
     init(
         conversionService: ConversionService = ConversionService(),
         engineManager: EngineManager = EngineManager(),
         filePanelService: FilePanelService = FilePanelService(),
-        debugLogService: DebugLogService = DebugLogService()
+        debugLogService: DebugLogService = DebugLogService(),
+        recentResultsStore: RecentResultsStore = RecentResultsStore()
     ) {
         self.conversionService = conversionService
         self.engineManager = engineManager
         self.engineUpdater = EngineUpdater(engineManager: engineManager)
         self.filePanelService = filePanelService
         self.debugLogService = debugLogService
-        UserDefaults.standard.register(defaults: ["revealAfterConversion": false])
+        self.recentResultsStore = recentResultsStore
+        AppSettings.registerDefaults()
+        AppSettings.migrateIfNeeded()
+        recentResults = Array(recentResultsStore.load().prefix(AppSettings.recentResultsLimit))
         refreshEngineState()
     }
 
     var isConverting: Bool {
-        jobs.contains { $0.status == .running || $0.status == .pending }
+        activeJobCount > 0
+    }
+
+    var activeJobCount: Int {
+        jobs.filter { $0.status == .pending || $0.status == .running }.count
+    }
+
+    var queueJobs: [ConversionJob] {
+        jobs.filter { $0.status == .pending || $0.status == .running || $0.status == .failed }
     }
 
     var statusSystemImage: String {
@@ -75,6 +91,11 @@ final class AppModel: ObservableObject {
         enqueue(urls: filePanelService.chooseFiles())
     }
 
+    @discardableResult
+    func pickFiles() -> [URL] {
+        filePanelService.chooseFiles()
+    }
+
     func enqueue(urls: [URL]) {
         let files = urls.filter { !$0.hasDirectoryPath }
         guard !files.isEmpty else { return }
@@ -92,16 +113,60 @@ final class AppModel: ObservableObject {
         drainQueueIfNeeded()
     }
 
+    func retryJob(_ job: ConversionJob) {
+        guard let index = jobs.firstIndex(where: { $0.id == job.id }) else { return }
+        jobs[index].status = .pending
+        jobs[index].errorMessage = nil
+        jobs[index].startedAt = nil
+        jobs[index].completedAt = nil
+        jobs[index].result = nil
+        drainQueueIfNeeded()
+    }
+
+    func trimRecentResultsToLimit() {
+        let limit = AppSettings.recentResultsLimit
+        recentResults = Array(recentResults.prefix(limit))
+        persistRecentResults()
+    }
+
     func reveal(_ url: URL) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
-    func copyMarkdown(_ result: ConversionResult) {
+    func copyMarkdownText(_ result: ConversionResult) {
         guard let text = try? String(contentsOf: result.markdownURL, encoding: .utf8) else {
+            showToast("Copy failed")
             return
         }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        showToast("Markdown text copied")
+    }
+
+    func copyMarkdownFile(_ result: ConversionResult) {
+        guard FileManager.default.fileExists(atPath: result.markdownURL.path) else {
+            showToast("Copy failed")
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([result.markdownURL as NSURL])
+        showToast("Markdown file copied")
+    }
+
+    func showToast(_ message: String) {
+        toastMessage = message
+        toastTask?.cancel()
+        toastTask = Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            toastMessage = nil
+        }
+    }
+
+    func updateShortcutConflictMessages(_ messages: [ShortcutKind: String]) {
+        shortcutConflictMessages = messages
     }
 
     func checkForEngineUpdates() {
@@ -200,15 +265,24 @@ final class AppModel: ObservableObject {
                 jobs[index].completedAt = Date()
                 jobs[index].result = result
                 recentResults.insert(result, at: 0)
-                recentResults = Array(recentResults.prefix(8))
+                trimRecentResultsToLimit()
 
-                if UserDefaults.standard.bool(forKey: "revealAfterConversion") {
+                if AppSettings.revealAfterConversion {
                     reveal(result.markdownURL)
                 }
+
+                applyAutoCopy(for: result)
+                ConversionNotificationService.notifyConversionSucceeded(result)
+                let completedJobID = jobs[index].id
+                jobs.removeAll { $0.id == completedJobID }
             } catch {
                 jobs[index].status = .failed
                 jobs[index].completedAt = Date()
                 jobs[index].errorMessage = error.localizedDescription
+                ConversionNotificationService.notifyConversionFailed(
+                    fileName: jobs[index].sourceURL.lastPathComponent,
+                    message: error.localizedDescription
+                )
                 recordDiagnostic(
                     title: "Conversion failed",
                     message: error.localizedDescription,
@@ -220,6 +294,21 @@ final class AppModel: ObservableObject {
                 )
             }
         }
+    }
+
+    private func applyAutoCopy(for result: ConversionResult) {
+        switch AppSettings.autoCopyMode {
+        case .none:
+            break
+        case .text:
+            copyMarkdownText(result)
+        case .file:
+            copyMarkdownFile(result)
+        }
+    }
+
+    private func persistRecentResults() {
+        recentResultsStore.save(recentResults)
     }
 
     private func convertWithWritableFallback(job: ConversionJob, runtime: EngineRuntime) async throws -> ConversionResult {

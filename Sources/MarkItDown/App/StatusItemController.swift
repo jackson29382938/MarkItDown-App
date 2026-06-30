@@ -14,6 +14,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private var statusItem: NSStatusItem?
     private var modelObserver: AnyCancellable?
     private var escapeMonitor: Any?
+    private var globalEscapeMonitor: Any?
     private var heartbeatTimer: Timer?
     private var workspaceObservers: [(NotificationCenter, NSObjectProtocol)] = []
 
@@ -27,14 +28,13 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     func start() {
         restoreStatusItem()
+        refreshTooltip()
         installRecoveryObservers()
         startHeartbeat()
     }
 
     func stop() {
-        if let escapeMonitor {
-            NSEvent.removeMonitor(escapeMonitor)
-        }
+        removeEscapeMonitor()
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
         workspaceObservers.forEach { center, token in
@@ -46,7 +46,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     func restoreStatusItem() {
         guard statusItem?.button == nil || statusItem?.isVisible == false else {
-            updateStatusImage()
+            updateStatusPresentation()
             return
         }
 
@@ -58,6 +58,29 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         showPopover()
     }
 
+    func togglePanel() {
+        popover.isShown ? closePopover() : showPopover()
+    }
+
+    func chooseFilesViaShortcut() {
+        if popover.isShown {
+            closePopover()
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        let urls = model.pickFiles()
+        guard !urls.isEmpty else { return }
+
+        model.enqueue(urls: urls)
+        showPopover()
+    }
+
+    func refreshTooltip() {
+        let toggle = ShortcutKind.togglePanel.load().displayString
+        let choose = ShortcutKind.chooseFiles.load().displayString
+        statusItem?.button?.toolTip = "MarkItDown (\(toggle) toggle, \(choose) choose files)"
+    }
+
     private func configureStatusItem(_ item: NSStatusItem) {
         item.isVisible = true
         item.behavior = []
@@ -66,10 +89,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             return
         }
         button.target = self
-        button.action = #selector(togglePopover(_:))
+        button.action = #selector(statusItemClicked(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.imagePosition = .imageOnly
         button.toolTip = "MarkItDown"
-        updateStatusImage()
+        updateStatusPresentation()
+        refreshTooltip()
     }
 
     private func configurePopover() {
@@ -79,7 +104,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         popover.contentViewController = NSHostingController(
             rootView: StatusPanelView(
                 model: model,
-                openSettings: { [weak self] in self?.openSettings() }
+                openSettings: { [weak self] in self?.openSettings() },
+                closePanel: { [weak self] in self?.closePopover() }
             )
         )
     }
@@ -87,13 +113,37 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private func observeModel() {
         modelObserver = model.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async {
-                self?.updateStatusImage()
+                self?.updateStatusPresentation()
             }
+        }
+    }
+
+    private func updateStatusPresentation() {
+        updateStatusImage()
+        updateStatusBadge()
+    }
+
+    private func updateStatusBadge() {
+        let count = model.activeJobCount
+        guard let button = statusItem?.button else { return }
+
+        if count > 0 {
+            button.title = "\(count)"
+            button.imagePosition = .imageLeading
+            button.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        } else {
+            button.title = ""
+            button.imagePosition = .imageOnly
         }
     }
 
     private func updateStatusImage() {
         restoreStatusItemIfNeededWithoutRecursing()
+        if let brandedImage = brandedStatusImage() {
+            statusItem?.button?.image = brandedImage
+            return
+        }
+
         let image = NSImage(
             systemSymbolName: model.statusSystemImage,
             accessibilityDescription: "MarkItDown"
@@ -102,8 +152,89 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         statusItem?.button?.image = image
     }
 
+    private func brandedStatusImage() -> NSImage? {
+        guard !model.isConverting, !model.hasAttention else {
+            return nil
+        }
+        return BrandImage.menuBarLogo()
+    }
+
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        guard let event = NSApp.currentEvent else {
+            togglePanel()
+            return
+        }
+
+        if event.type == .rightMouseUp {
+            showStatusMenu(from: sender)
+        } else {
+            togglePanel()
+        }
+    }
+
     @objc private func togglePopover(_ sender: Any?) {
-        popover.isShown ? closePopover() : showPopover()
+        togglePanel()
+    }
+
+    @objc private func togglePanelFromMenu() {
+        togglePanel()
+    }
+
+    @objc private func chooseFilesFromMenu() {
+        chooseFilesViaShortcut()
+    }
+
+    @objc private func openSettingsFromMenu() {
+        openSettings()
+    }
+
+    @objc private func quitFromMenu() {
+        NSApp.terminate(nil)
+    }
+
+    private func showStatusMenu(from button: NSStatusBarButton) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let toggleItem = NSMenuItem(
+            title: "Toggle Panel",
+            action: #selector(togglePanelFromMenu),
+            keyEquivalent: ""
+        )
+        toggleItem.target = self
+        menu.addItem(toggleItem)
+
+        let chooseItem = NSMenuItem(
+            title: "Choose Files…",
+            action: #selector(chooseFilesFromMenu),
+            keyEquivalent: ""
+        )
+        chooseItem.target = self
+        menu.addItem(chooseItem)
+
+        menu.addItem(.separator())
+
+        let settingsItem = NSMenuItem(
+            title: "Settings…",
+            action: #selector(openSettingsFromMenu),
+            keyEquivalent: ""
+        )
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        let quitItem = NSMenuItem(
+            title: "Quit MarkItDown",
+            action: #selector(quitFromMenu),
+            keyEquivalent: "q"
+        )
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: 0, y: button.bounds.height + 5),
+            in: button
+        )
     }
 
     private func showPopover() {
@@ -112,9 +243,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             logger.error("Cannot show panel because the status item button is missing")
             return
         }
-        updateStatusImage()
+        updateStatusPresentation()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        NSApp.activate(ignoringOtherApps: true)
         popover.contentViewController?.view.window?.makeKey()
         installEscapeMonitor()
     }
@@ -130,25 +260,31 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     private func installEscapeMonitor() {
-        guard escapeMonitor == nil else { return }
+        guard escapeMonitor == nil, globalEscapeMonitor == nil else { return }
+
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self else { return event }
-            guard event.keyCode == 53 else { return event }
+            guard let self, event.keyCode == 53, self.popover.isShown else { return event }
+            self.closePopover()
+            return nil
+        }
 
-            let popoverWindow = self.popover.contentViewController?.view.window
-            if event.window == popoverWindow || NSApp.keyWindow == popoverWindow {
+        globalEscapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, event.keyCode == 53, self.popover.isShown else { return }
+            Task { @MainActor in
                 self.closePopover()
-                return nil
             }
-
-            return event
         }
     }
 
     private func removeEscapeMonitor() {
-        guard let escapeMonitor else { return }
-        NSEvent.removeMonitor(escapeMonitor)
-        self.escapeMonitor = nil
+        if let escapeMonitor {
+            NSEvent.removeMonitor(escapeMonitor)
+            self.escapeMonitor = nil
+        }
+        if let globalEscapeMonitor {
+            NSEvent.removeMonitor(globalEscapeMonitor)
+            self.globalEscapeMonitor = nil
+        }
     }
 
     func popoverDidClose(_ notification: Notification) {

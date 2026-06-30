@@ -48,12 +48,20 @@ private struct RecentResultRow: View {
             Spacer()
 
             Button {
-                model.copyMarkdown(result)
+                model.copyMarkdownText(result)
             } label: {
                 Image(systemName: "doc.on.doc")
             }
             .buttonStyle(.borderless)
-            .help("Copy Markdown")
+            .help("Copy Markdown Text")
+
+            Button {
+                model.copyMarkdownFile(result)
+            } label: {
+                Image(systemName: "doc.badge.arrow.up")
+            }
+            .buttonStyle(.borderless)
+            .help("Copy Markdown File")
 
             Button {
                 model.reveal(result.markdownURL)
