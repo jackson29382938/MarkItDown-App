@@ -1,45 +1,35 @@
 import AppKit
 import SwiftUI
 
+@MainActor
 enum BrandImage {
+    static let aspectRatio = MarkItDownLogoShape.designSize.width / MarkItDownLogoShape.designSize.height
+
     static func menuBarLogo(height pointSize: CGFloat = 18) -> NSImage? {
-        guard let image = load(named: "MenuBarLogo") else {
-            return nil
-        }
-        image.isTemplate = true
-        image.size = fittedSize(for: image, height: pointSize)
-        return image
+        renderVectorImage(size: menuBarLogoSize(height: pointSize), template: true)
     }
 
     static func menuBarLogoSize(height pointSize: CGFloat = 18) -> CGSize {
-        guard let image = load(named: "MenuBarLogo") else {
-            return CGSize(width: pointSize, height: pointSize)
-        }
-        return fittedSize(for: image, height: pointSize)
+        CGSize(width: pointSize * aspectRatio, height: pointSize)
     }
 
-    private static func load(named name: String) -> NSImage? {
-        guard let url = Bundle.main.url(forResource: name, withExtension: "png", subdirectory: "Brand"),
-              let image = NSImage(contentsOf: url) else {
+    @MainActor
+    private static func renderVectorImage(size: CGSize, template: Bool) -> NSImage? {
+        let content = MarkItDownLogoView(lineWidth: size.height * 0.09)
+            .frame(width: size.width, height: size.height)
+            .padding(size.height * 0.04)
+
+        let renderer = ImageRenderer(content: content)
+        renderer.isOpaque = false
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2.0
+
+        guard let cgImage = renderer.cgImage else {
             return nil
         }
+
+        let image = NSImage(cgImage: cgImage, size: size)
+        image.isTemplate = template
         return image
-    }
-
-    private static func fittedSize(for image: NSImage, height: CGFloat) -> CGSize {
-        let pixels = pixelDimensions(of: image)
-        guard pixels.height > 0 else {
-            return CGSize(width: height, height: height)
-        }
-        let aspect = pixels.width / pixels.height
-        return CGSize(width: height * aspect, height: height)
-    }
-
-    private static func pixelDimensions(of image: NSImage) -> CGSize {
-        if let bitmap = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first {
-            return CGSize(width: bitmap.pixelsWide, height: bitmap.pixelsHigh)
-        }
-        return image.size
     }
 }
 
@@ -51,18 +41,8 @@ struct AppLogoView: View {
     }
 
     var body: some View {
-        Group {
-            if let logo = BrandImage.menuBarLogo(height: height) {
-                Image(nsImage: logo)
-                    .renderingMode(.template)
-                    .foregroundStyle(.primary)
-            } else {
-                Image(systemName: "doc.text")
-                    .font(.system(size: height * 0.72, weight: .semibold))
-                    .foregroundStyle(.primary)
-            }
-        }
-        .frame(width: logoSize.width, height: logoSize.height)
-        .accessibilityLabel("MarkItDown")
+        MarkItDownLogoView(lineWidth: height * 0.09)
+            .frame(width: logoSize.width, height: logoSize.height)
+            .accessibilityLabel("MarkItDown")
     }
 }

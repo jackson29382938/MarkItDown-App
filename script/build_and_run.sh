@@ -82,6 +82,7 @@ bootstrap_engine_cache() {
 stage_app() {
   pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
+  bash "$ROOT_DIR/script/render_brand_assets.sh"
   bash "$ROOT_DIR/script/generate_quick_action_workflow.sh"
 
   swift build
