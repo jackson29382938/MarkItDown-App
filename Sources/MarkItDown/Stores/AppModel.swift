@@ -145,13 +145,10 @@ final class AppModel: ObservableObject {
     }
 
     func copyMarkdownFile(_ result: ConversionResult) {
-        guard FileManager.default.fileExists(atPath: result.markdownURL.path) else {
+        guard PasteboardFileWriter.copyFile(result.markdownURL) else {
             showToast("Copy failed")
             return
         }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.writeObjects([result.markdownURL as NSURL])
         showToast("Markdown file copied")
     }
 

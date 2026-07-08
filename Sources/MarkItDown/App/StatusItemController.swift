@@ -11,6 +11,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     )
     private let model: AppModel
     private let popover: NSPopover
+    private let settingsWindowController: SettingsWindowController
     private var statusItem: NSStatusItem?
     private var modelObserver: AnyCancellable?
     private var escapeMonitor: Any?
@@ -21,6 +22,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     init(model: AppModel) {
         self.model = model
         self.popover = NSPopover()
+        self.settingsWindowController = SettingsWindowController(model: model)
         super.init()
         configurePopover()
         observeModel()
@@ -255,8 +257,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     private func openSettings() {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        closePopover()
+        settingsWindowController.show()
     }
 
     private func installEscapeMonitor() {
