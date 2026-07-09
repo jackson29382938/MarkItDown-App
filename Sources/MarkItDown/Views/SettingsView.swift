@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.recentResultsLimitKey) private var recentResultsLimit = 8
     @AppStorage(AppSettings.notifyOnConversionCompleteKey) private var notifyOnConversionComplete = true
     @AppStorage(AppSettings.notifyOnConversionFailureKey) private var notifyOnConversionFailure = true
+    @AppStorage(AppSettings.watchFolderEnabledKey) private var watchFolderEnabled = false
     @AppStorage("launchAtLogin") private var launchAtLogin = false
 
     @State private var launchAtLoginError: String?
@@ -44,6 +45,49 @@ struct SettingsView: View {
 
                 Toggle("Notify when conversion completes", isOn: $notifyOnConversionComplete)
                 Toggle("Notify when conversion fails", isOn: $notifyOnConversionFailure)
+
+                LabeledContent("Watch Folder") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Enabled", isOn: $watchFolderEnabled)
+                            .onChange(of: watchFolderEnabled) { _, enabled in
+                                model.setWatchFolderEnabled(enabled)
+                            }
+
+                        Text(model.watchedFolderURL?.path ?? "No folder selected")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+
+                        HStack {
+                            Button {
+                                model.chooseWatchFolder()
+                            } label: {
+                                Label(model.watchedFolderURL == nil ? "Choose" : "Change", systemImage: "folder.badge.plus")
+                            }
+
+                            if let watchedFolderURL = model.watchedFolderURL {
+                                Button {
+                                    model.reveal(watchedFolderURL)
+                                } label: {
+                                    Label("Reveal", systemImage: "folder")
+                                }
+
+                                Button {
+                                    model.clearWatchFolder()
+                                } label: {
+                                    Label("Clear", systemImage: "xmark.circle")
+                                }
+                            }
+                        }
+
+                        if let watchFolderError = model.watchFolderError {
+                            Text(watchFolderError)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
 
                 LabeledContent(ShortcutKind.togglePanel.title) {
                     ShortcutSettingsView(kind: .togglePanel, model: model)

@@ -26,6 +26,8 @@ enum AppSettings {
     static let recentResultsLimitKey = "recentResultsLimit"
     static let notifyOnConversionCompleteKey = "notifyOnConversionComplete"
     static let notifyOnConversionFailureKey = "notifyOnConversionFailure"
+    static let watchFolderEnabledKey = "watchFolderEnabled"
+    static let watchFolderPathKey = "watchFolderPath"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
@@ -33,7 +35,9 @@ enum AppSettings {
             copyAfterConversionMode: AutoCopyMode.none.rawValue,
             recentResultsLimitKey: 8,
             notifyOnConversionCompleteKey: true,
-            notifyOnConversionFailureKey: true
+            notifyOnConversionFailureKey: true,
+            watchFolderEnabledKey: false,
+            watchFolderPathKey: ""
         ])
     }
 
@@ -76,6 +80,25 @@ enum AppSettings {
 
     static var notifyOnConversionFailure: Bool {
         UserDefaults.standard.bool(forKey: notifyOnConversionFailureKey)
+    }
+
+    static var watchFolderEnabled: Bool {
+        get {
+            UserDefaults.standard.bool(forKey: watchFolderEnabledKey)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: watchFolderEnabledKey)
+        }
+    }
+
+    static var watchFolderURL: URL? {
+        get {
+            let path = UserDefaults.standard.string(forKey: watchFolderPathKey) ?? ""
+            return path.isEmpty ? nil : URL(fileURLWithPath: path, isDirectory: true)
+        }
+        set {
+            UserDefaults.standard.set(newValue?.path ?? "", forKey: watchFolderPathKey)
+        }
     }
 }
 

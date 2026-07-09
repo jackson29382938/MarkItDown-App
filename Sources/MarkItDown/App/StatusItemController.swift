@@ -80,7 +80,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     func refreshTooltip() {
         let toggle = ShortcutKind.togglePanel.load().displayString
         let choose = ShortcutKind.chooseFiles.load().displayString
-        statusItem?.button?.toolTip = "MarkItDown (\(toggle) toggle, \(choose) choose files)"
+        statusItem?.button?.toolTip = "MarkItDown (\(toggle) toggle, \(choose) choose)"
     }
 
     private func configureStatusItem(_ item: NSStatusItem) {
@@ -207,7 +207,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         menu.addItem(toggleItem)
 
         let chooseItem = NSMenuItem(
-            title: "Choose Files…",
+            title: "Choose Files or Folders…",
             action: #selector(chooseFilesFromMenu),
             keyEquivalent: ""
         )

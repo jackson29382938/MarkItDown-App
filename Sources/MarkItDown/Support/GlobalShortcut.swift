@@ -78,7 +78,7 @@ enum ShortcutKind: String, CaseIterable, Identifiable {
         case .togglePanel:
             return "Toggle panel"
         case .chooseFiles:
-            return "Choose files"
+            return "Choose files or folders"
         }
     }
 

@@ -24,6 +24,7 @@ struct StatusPanelView: View {
             }
 
             actionRow
+            watchFolderRow
 
             if !model.queueJobs.isEmpty {
                 JobQueueView(model: model)
@@ -61,7 +62,7 @@ struct StatusPanelView: View {
     private var shortcutFooter: String {
         let toggle = ShortcutKind.togglePanel.load().displayString
         let choose = ShortcutKind.chooseFiles.load().displayString
-        return "\(toggle) toggle · \(choose) choose files · Esc to close"
+        return "\(toggle) toggle · \(choose) choose · Esc to close"
     }
 
     private var header: some View {
@@ -108,7 +109,7 @@ struct StatusPanelView: View {
             Button {
                 model.chooseFiles()
             } label: {
-                Label("Choose Files", systemImage: "plus")
+                Label("Choose", systemImage: "plus")
             }
             .keyboardShortcut("o")
 
@@ -136,6 +137,27 @@ struct StatusPanelView: View {
                 Image(systemName: "power")
             }
             .help("Quit")
+        }
+    }
+
+    @ViewBuilder
+    private var watchFolderRow: some View {
+        if let watchFolderError = model.watchFolderError {
+            StatusMessageView(systemImage: "eye.slash", text: "Watch folder: \(watchFolderError)")
+        } else if model.isWatchFolderActive, let watchedFolderURL = model.watchedFolderURL {
+            HStack(spacing: 8) {
+                Image(systemName: "eye")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+
+                Text("Watching \(watchedFolderURL.lastPathComponent)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer()
+            }
         }
     }
 

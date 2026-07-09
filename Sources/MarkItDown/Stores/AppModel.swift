@@ -12,11 +12,16 @@ final class AppModel: ObservableObject {
     @Published var updateStatus: EngineUpdateStatus = .idle
     @Published private(set) var toastMessage: String?
     @Published private(set) var shortcutConflictMessages: [ShortcutKind: String] = [:]
+    @Published private(set) var watchedFolderURL: URL?
+    @Published private(set) var isWatchFolderActive = false
+    @Published private(set) var watchFolderError: String?
 
     private let conversionService: ConversionService
     private let engineManager: EngineManager
     private let engineUpdater: EngineUpdater
     private let filePanelService: FilePanelService
+    private let fileInputResolver: FileInputResolver
+    private let watchFolderService: WatchFolderService
     private let debugLogService: DebugLogService
     private let recentResultsStore: RecentResultsStore
     private var isDrainingQueue = false
@@ -26,6 +31,8 @@ final class AppModel: ObservableObject {
         conversionService: ConversionService = ConversionService(),
         engineManager: EngineManager = EngineManager(),
         filePanelService: FilePanelService = FilePanelService(),
+        fileInputResolver: FileInputResolver = FileInputResolver(),
+        watchFolderService: WatchFolderService = WatchFolderService(),
         debugLogService: DebugLogService = DebugLogService(),
         recentResultsStore: RecentResultsStore = RecentResultsStore()
     ) {
@@ -33,12 +40,16 @@ final class AppModel: ObservableObject {
         self.engineManager = engineManager
         self.engineUpdater = EngineUpdater(engineManager: engineManager)
         self.filePanelService = filePanelService
+        self.fileInputResolver = fileInputResolver
+        self.watchFolderService = watchFolderService
         self.debugLogService = debugLogService
         self.recentResultsStore = recentResultsStore
         AppSettings.registerDefaults()
         AppSettings.migrateIfNeeded()
+        configureWatchFolderCallbacks()
         recentResults = Array(recentResultsStore.load().prefix(AppSettings.recentResultsLimit))
         refreshEngineState()
+        restoreWatchFolderFromSettings()
     }
 
     var isConverting: Bool {
@@ -91,13 +102,18 @@ final class AppModel: ObservableObject {
         enqueue(urls: filePanelService.chooseFiles())
     }
 
+    func chooseWatchFolder() {
+        guard let url = filePanelService.chooseFolder() else { return }
+        setWatchFolder(url)
+    }
+
     @discardableResult
     func pickFiles() -> [URL] {
         filePanelService.chooseFiles()
     }
 
     func enqueue(urls: [URL]) {
-        let files = urls.filter { !$0.hasDirectoryPath }
+        let files = fileInputResolver.resolveFiles(from: urls)
         guard !files.isEmpty else { return }
 
         var reservedOutputs = Set(jobs.map(\.outputURL))
@@ -111,6 +127,43 @@ final class AppModel: ObservableObject {
         }
         jobs.append(contentsOf: newJobs)
         drainQueueIfNeeded()
+    }
+
+    func setWatchFolder(_ url: URL) {
+        let standardizedURL = url.standardizedFileURL
+        watchedFolderURL = standardizedURL
+        watchFolderError = nil
+        AppSettings.watchFolderURL = standardizedURL
+        AppSettings.watchFolderEnabled = true
+        watchFolderService.start(watching: standardizedURL)
+    }
+
+    func setWatchFolderEnabled(_ enabled: Bool) {
+        AppSettings.watchFolderEnabled = enabled
+
+        guard enabled else {
+            watchFolderService.stop()
+            return
+        }
+
+        if let watchedFolderURL {
+            watchFolderService.start(watching: watchedFolderURL)
+        } else if let savedURL = AppSettings.watchFolderURL {
+            watchedFolderURL = savedURL
+            watchFolderService.start(watching: savedURL)
+        } else {
+            AppSettings.watchFolderEnabled = false
+            isWatchFolderActive = false
+            watchFolderError = "Choose a folder to start watching."
+        }
+    }
+
+    func clearWatchFolder() {
+        watchFolderService.stop()
+        watchedFolderURL = nil
+        watchFolderError = nil
+        AppSettings.watchFolderURL = nil
+        AppSettings.watchFolderEnabled = false
     }
 
     func retryJob(_ job: ConversionJob) {
@@ -290,6 +343,55 @@ final class AppModel: ObservableObject {
                     )
                 )
             }
+        }
+    }
+
+    private func configureWatchFolderCallbacks() {
+        watchFolderService.onFilesDetected = { [weak self] urls in
+            Task { @MainActor in
+                self?.enqueue(urls: urls)
+            }
+        }
+
+        watchFolderService.onStateChanged = { [weak self] state in
+            Task { @MainActor in
+                self?.applyWatchFolderState(state)
+            }
+        }
+    }
+
+    private func restoreWatchFolderFromSettings() {
+        watchedFolderURL = AppSettings.watchFolderURL
+        guard AppSettings.watchFolderEnabled, let watchedFolderURL else {
+            isWatchFolderActive = false
+            watchFolderError = nil
+            return
+        }
+
+        watchFolderService.start(watching: watchedFolderURL)
+    }
+
+    private func applyWatchFolderState(_ state: WatchFolderService.State) {
+        switch state {
+        case .inactive:
+            isWatchFolderActive = false
+            watchFolderError = nil
+        case .watching(let url):
+            watchedFolderURL = url
+            isWatchFolderActive = true
+            watchFolderError = nil
+        case .failed(let message):
+            isWatchFolderActive = false
+            watchFolderError = message
+            AppSettings.watchFolderEnabled = false
+            recordDiagnostic(
+                title: "Watch folder unavailable",
+                message: message,
+                details: [
+                    "Watch folder: \(watchedFolderURL?.path ?? "unset")",
+                    "Error: \(message)"
+                ].joined(separator: "\n")
+            )
         }
     }
 

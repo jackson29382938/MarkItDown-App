@@ -22,7 +22,7 @@ struct DropZoneView: View {
                     .frame(width: 28, height: 28)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(isConverting ? "Converting" : "Drop Files")
+                    Text(isConverting ? "Converting" : "Drop Files or Folders")
                         .font(.headline)
                     Text("PDF, Office, HTML, data, ZIP")
                         .font(.caption)
