@@ -80,9 +80,7 @@ struct FileInputResolver {
         case .userSelection:
             return true
         case .watchedFolder:
-            return !Self.markdownExtensions.contains(url.pathExtension.lowercased())
+            return !SupportedFileTypes.isMarkdown(url)
         }
     }
-
-    private static let markdownExtensions: Set<String> = ["md", "markdown", "mdown", "mkd"]
 }

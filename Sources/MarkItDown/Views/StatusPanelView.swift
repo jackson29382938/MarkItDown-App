@@ -19,8 +19,15 @@ struct StatusPanelView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
-            DropZoneView(isConverting: model.isConverting) { urls in
+            DropZoneView(isConverting: model.isConverting && !model.isCombining) { urls in
                 model.enqueue(urls: urls)
+            }
+
+            CombineDropZoneView(
+                items: $model.combineItems,
+                isCombining: model.isCombining
+            ) {
+                model.combineFromPanel()
             }
 
             actionRow

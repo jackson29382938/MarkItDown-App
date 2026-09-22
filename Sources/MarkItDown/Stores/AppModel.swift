@@ -15,6 +15,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var watchedFolderURL: URL?
     @Published private(set) var isWatchFolderActive = false
     @Published private(set) var watchFolderError: String?
+    @Published var combineItems: [CombineItem] = []
+    @Published private(set) var isCombining = false
 
     private let conversionService: ConversionService
     private let engineManager: EngineManager
@@ -26,6 +28,8 @@ final class AppModel: ObservableObject {
     private let recentResultsStore: RecentResultsStore
     private var isDrainingQueue = false
     private var toastTask: Task<Void, Never>?
+    private var pendingCombineURLs: [URL] = []
+    private var combineFlushTask: Task<Void, Never>?
 
     init(
         conversionService: ConversionService = ConversionService(),
@@ -53,7 +57,7 @@ final class AppModel: ObservableObject {
     }
 
     var isConverting: Bool {
-        activeJobCount > 0
+        activeJobCount > 0 || isCombining
     }
 
     var activeJobCount: Int {
@@ -127,6 +131,36 @@ final class AppModel: ObservableObject {
         }
         jobs.append(contentsOf: newJobs)
         drainQueueIfNeeded()
+    }
+
+    func addCombineFiles(_ urls: [URL]) {
+        let files = fileInputResolver.resolveFiles(from: urls)
+        for file in files {
+            guard !combineItems.contains(where: { $0.url.path == file.path }) else { continue }
+            combineItems.append(CombineItem(url: file))
+        }
+    }
+
+    func combineFromPanel() {
+        let urls = combineItems.map(\.url)
+        guard !urls.isEmpty else { return }
+        Task {
+            await performCombine(urls: urls, preservePanelOrder: true, clearPanelOnSuccess: true)
+        }
+    }
+
+    /// Batches Finder Quick Action URLs that may arrive as separate `open` calls.
+    func enqueueCombine(urls: [URL]) {
+        pendingCombineURLs.append(contentsOf: urls)
+        combineFlushTask?.cancel()
+        combineFlushTask = Task {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            let batch = pendingCombineURLs
+            pendingCombineURLs.removeAll()
+            guard !batch.isEmpty else { return }
+            await performCombine(urls: batch, preservePanelOrder: false, clearPanelOnSuccess: false)
+        }
     }
 
     func setWatchFolder(_ url: URL) {
@@ -287,6 +321,129 @@ final class AppModel: ObservableObject {
 
     func clearDiagnostics() {
         diagnostics.removeAll()
+    }
+
+    private func performCombine(
+        urls: [URL],
+        preservePanelOrder: Bool,
+        clearPanelOnSuccess: Bool
+    ) async {
+        guard !isCombining else {
+            showToast("Combine already in progress")
+            return
+        }
+
+        var files = fileInputResolver.resolveFiles(from: urls)
+        guard !files.isEmpty else {
+            showToast("No files to combine")
+            return
+        }
+
+        if !preservePanelOrder {
+            files = CombineMarkdownService.orderedSources(files, order: AppSettings.combineFinderOrder)
+        }
+
+        guard let outputURL = await CombineDestinationPicker.resolveOutputURL(for: files) else {
+            return
+        }
+
+        isCombining = true
+        defer { isCombining = false }
+
+        do {
+            let runtime = try engineManager.activeEngine()
+            engineManifest = runtime.manifest
+            engineError = nil
+
+            let tempDirectory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("MarkItDown-Combine-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+            var sections: [(fileName: String, markdown: String)] = []
+            var individualResults: [ConversionResult] = []
+            var occupiedOutputs = reservedOutputURLs
+            let started = Date()
+
+            for sourceURL in files {
+                let fileName = sourceURL.deletingPathExtension().lastPathComponent
+                let markdownText: String
+
+                if SupportedFileTypes.isMarkdown(sourceURL) {
+                    markdownText = try String(contentsOf: sourceURL, encoding: .utf8)
+                } else if AppSettings.combineWriteIndividualFiles {
+                    let individualURL = OutputPathResolver.markdownOutputURL(
+                        for: sourceURL,
+                        avoiding: occupiedOutputs
+                    )
+                    occupiedOutputs.insert(individualURL)
+                    let individual = try await conversionService.convert(
+                        sourceURL: sourceURL,
+                        outputURL: individualURL,
+                        using: runtime
+                    )
+                    individualResults.append(individual)
+                    markdownText = try String(contentsOf: individual.markdownURL, encoding: .utf8)
+                } else {
+                    let tempOutput = tempDirectory
+                        .appendingPathComponent(sourceURL.deletingPathExtension().lastPathComponent)
+                        .appendingPathExtension("md")
+                    let tempResult = try await conversionService.convert(
+                        sourceURL: sourceURL,
+                        outputURL: tempOutput,
+                        using: runtime
+                    )
+                    markdownText = try String(contentsOf: tempResult.markdownURL, encoding: .utf8)
+                }
+
+                sections.append((fileName: fileName, markdown: markdownText))
+            }
+
+            let merged = CombineMarkdownService.merge(
+                sections: sections,
+                style: AppSettings.combineSeparatorStyle
+            )
+            guard !merged.isEmpty else {
+                throw CombineError.emptyResult
+            }
+
+            try merged.write(to: outputURL, atomically: true, encoding: .utf8)
+
+            let elapsed = Date().timeIntervalSince(started)
+            let result = ConversionResult(
+                sourceURL: files[0],
+                markdownURL: outputURL,
+                engineVersion: runtime.manifest.markitdownVersion,
+                elapsedTime: elapsed
+            )
+            recentResults.insert(result, at: 0)
+            for individual in individualResults.reversed() {
+                recentResults.insert(individual, at: 0)
+            }
+            trimRecentResultsToLimit()
+
+            if AppSettings.revealAfterConversion {
+                reveal(outputURL)
+            }
+            applyAutoCopy(for: result)
+            ConversionNotificationService.notifyConversionSucceeded(result)
+            showToast("Combined \(files.count) files")
+
+            if clearPanelOnSuccess {
+                combineItems.removeAll()
+            }
+        } catch {
+            ConversionNotificationService.notifyConversionFailed(
+                fileName: "Combine",
+                message: error.localizedDescription
+            )
+            recordDiagnostic(
+                title: "Combine failed",
+                message: error.localizedDescription,
+                details: diagnosticDetails(error: error)
+            )
+            showToast("Combine failed")
+        }
     }
 
     private func drainQueueIfNeeded() {
@@ -491,5 +648,16 @@ final class AppModel: ObservableObject {
         }
 
         return lines.joined(separator: "\n")
+    }
+}
+
+private enum CombineError: LocalizedError {
+    case emptyResult
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyResult:
+            return "Nothing to combine — all selected files were empty."
+        }
     }
 }

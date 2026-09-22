@@ -138,30 +138,6 @@ stage_app() {
       </array>
     </dict>
   </array>
-  <key>NSServices</key>
-  <array>
-    <dict>
-      <key>NSMenuItem</key>
-      <dict>
-        <key>default</key>
-        <string>Convert to Markdown</string>
-      </dict>
-      <key>NSMessage</key>
-      <string>convertToMarkdown</string>
-      <key>NSPortName</key>
-      <string>$APP_NAME</string>
-      <key>NSSendTypes</key>
-      <array>
-        <string>NSFilenamesPboardType</string>
-        <string>public.file-url</string>
-      </array>
-      <key>NSRequiredContext</key>
-      <dict>
-        <key>NSApplicationIdentifier</key>
-        <string>com.apple.finder</string>
-      </dict>
-    </dict>
-  </array>
 </dict>
 </plist>
 PLIST

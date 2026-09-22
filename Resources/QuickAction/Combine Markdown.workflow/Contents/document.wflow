@@ -38,12 +38,12 @@
 				<dict>
 					<key>COMMAND_STRING</key>
 					<string>#!/bin/bash
-ALLOWLIST="csv docx htm html json msg pdf pptx txt xls xlsx xml"
+ALLOWLIST="csv docx htm html json markdown md mdown mkd msg pdf pptx txt xls xlsx xml"
 urls=()
 for f in "$@"; do
   if [[ -d "$f" ]]; then
     encoded=$(/usr/bin/osascript -l JavaScript -e 'function run(argv){return encodeURIComponent(argv[0])}' "$f")
-    urls+=("markitdown://convert?path=$encoded")
+    urls+=("markitdown://combine?path=$encoded")
     continue
   fi
   [[ -f "$f" ]] || continue
@@ -52,7 +52,7 @@ for f in "$@"; do
   case " $ALLOWLIST " in
     *" $ext_lc "*)
       encoded=$(/usr/bin/osascript -l JavaScript -e 'function run(argv){return encodeURIComponent(argv[0])}' "$f")
-      urls+=("markitdown://convert?path=$encoded")
+      urls+=("markitdown://combine?path=$encoded")
       ;;
   esac
 done
@@ -86,7 +86,7 @@ fi
 				<key>Class Name</key>
 				<string>RunShellScriptAction</string>
 				<key>InputUUID</key>
-				<string>markitdown-convert-input</string>
+				<string>markitdown-combine-input</string>
 				<key>Keywords</key>
 				<array>
 					<string>Shell</string>
@@ -96,9 +96,9 @@ fi
 					<string>Unix</string>
 				</array>
 				<key>OutputUUID</key>
-				<string>markitdown-convert-output</string>
+				<string>markitdown-combine-output</string>
 				<key>UUID</key>
-				<string>markitdown-convert-shell</string>
+				<string>markitdown-combine-shell</string>
 				<key>UnlocalizedApplications</key>
 				<array>
 					<string>Automator</string>
@@ -114,7 +114,7 @@ fi
 				<key>nestedActions</key>
 				<array/>
 				<key>savedInputUUID</key>
-				<string>markitdown-convert-input</string>
+				<string>markitdown-combine-input</string>
 			</dict>
 		</dict>
 	</array>
@@ -129,9 +129,9 @@ fi
 		<key>serviceOutputTypeIdentifier</key>
 		<string>com.apple.Automator.nothing</string>
 		<key>workflowSubtitle</key>
-		<string>Convert selected files to Markdown</string>
+		<string>Combine selected files into one Markdown file</string>
 		<key>workflowTitle</key>
-		<string>Convert to Markdown</string>
+		<string>Combine Markdown</string>
 		<key>workflowTypeIdentifier</key>
 		<string>com.apple.Automator.servicesMenu</string>
 	</dict>

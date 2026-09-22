@@ -15,17 +15,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         super.init()
     }
 
-    func applicationWillFinishLaunching(_ notification: Notification) {
-        NSApp.servicesProvider = self
-    }
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        NSUpdateDynamicServices()
+        QuickActionInstaller.installIfNeeded()
         ConversionNotificationService.requestAuthorizationIfNeeded()
         statusItemController.start()
         registerGlobalShortcuts()
-        handleIncomingFileURLs(parseConvertArguments(CommandLine.arguments))
+        handleIncomingURLs(parseConvertArguments(CommandLine.arguments).map { (.convert, $0) })
 
         shortcutObserver = NotificationCenter.default.addObserver(
             forName: .globalShortcutDidChange,
@@ -70,19 +66,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        handleIncomingFileURLs(urls.flatMap(urlsFromLaunchURL))
-    }
-
-    @objc func convertToMarkdown(_ pboard: NSPasteboard, userData: String, error: NSErrorPointer) -> Bool {
-        var urls: [URL] = []
-        if let filenames = pboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")) as? [String] {
-            urls = filenames.map { URL(fileURLWithPath: $0) }
-        } else if let fileURLs = pboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
-            urls = fileURLs
-        }
-        guard !urls.isEmpty else { return false }
-        model.enqueue(urls: urls)
-        return true
+        let routed = urls.flatMap(routeLaunchURL)
+        handleIncomingURLs(routed)
     }
 
     private func registerGlobalShortcuts() {
@@ -99,7 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] in
             self?.statusItemController.togglePanel()
         }
-        applyRegistrationResult(toggleResult, for: .togglePanel, into: &conflictMessages)
+        applyShortcutResult(toggleResult, kind: .togglePanel, into: &conflictMessages)
 
         let chooseResult = hotKeyService.register(
             shortcut: ShortcutKind.chooseFiles.load(),
@@ -107,14 +92,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] in
             self?.statusItemController.chooseFilesViaShortcut()
         }
-        applyRegistrationResult(chooseResult, for: .chooseFiles, into: &conflictMessages)
+        applyShortcutResult(chooseResult, kind: .chooseFiles, into: &conflictMessages)
 
         model.updateShortcutConflictMessages(conflictMessages)
     }
 
-    private func applyRegistrationResult(
+    private func applyShortcutResult(
         _ result: HotKeyRegistrationResult,
-        for kind: ShortcutKind,
+        kind: ShortcutKind,
         into conflictMessages: inout [ShortcutKind: String]
     ) {
         switch result {
@@ -129,9 +114,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func handleIncomingFileURLs(_ urls: [URL]) {
-        guard !urls.isEmpty else { return }
-        model.enqueue(urls: urls)
+    private enum IncomingAction {
+        case convert
+        case combine
+    }
+
+    private func handleIncomingURLs(_ items: [(IncomingAction, URL)]) {
+        guard !items.isEmpty else { return }
+
+        let convertURLs = items.compactMap { $0.0 == .convert ? $0.1 : nil }
+        let combineURLs = items.compactMap { $0.0 == .combine ? $0.1 : nil }
+
+        if !convertURLs.isEmpty {
+            model.enqueue(urls: convertURLs)
+        }
+        if !combineURLs.isEmpty {
+            model.enqueueCombine(urls: combineURLs)
+        }
     }
 
     private func parseConvertArguments(_ arguments: [String]) -> [URL] {
@@ -151,18 +150,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return urls
     }
 
-    private func urlsFromLaunchURL(_ url: URL) -> [URL] {
-        if url.scheme == "markitdown", url.host == "convert" {
+    private func routeLaunchURL(_ url: URL) -> [(IncomingAction, URL)] {
+        if url.scheme == "markitdown" {
+            let host = url.host ?? ""
             guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
                   let rawPath = components.queryItems?.first(where: { $0.name == "path" })?.value else {
                 return []
             }
             let decoded = rawPath.removingPercentEncoding ?? rawPath
-            return [URL(fileURLWithPath: decoded)]
+            let fileURL = URL(fileURLWithPath: decoded)
+            switch host {
+            case "combine":
+                return [(.combine, fileURL)]
+            case "convert":
+                return [(.convert, fileURL)]
+            default:
+                return [(.convert, fileURL)]
+            }
         }
 
         if url.isFileURL {
-            return [url]
+            return [(.convert, url)]
         }
 
         return []
