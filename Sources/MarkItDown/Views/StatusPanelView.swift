@@ -38,7 +38,7 @@ struct StatusPanelView: View {
             }
 
             if !model.recentResults.isEmpty {
-                RecentResultsView(model: model)
+                RecentResultsView(model: model, closePanel: closePanel)
             }
 
             if let latestDiagnostic = model.latestDiagnostic {

@@ -54,6 +54,7 @@ enum RecentResultShortcut {
 
 struct RecentResultsView: View {
     @ObservedObject var model: AppModel
+    var closePanel: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -70,7 +71,12 @@ struct RecentResultsView: View {
 
             VStack(spacing: 0) {
                 ForEach(Array(model.recentResults.enumerated()), id: \.element.id) { index, result in
-                    RecentResultRow(result: result, index: index, model: model)
+                    RecentResultRow(
+                        result: result,
+                        index: index,
+                        model: model,
+                        closePanel: closePanel
+                    )
 
                     if result.id != model.recentResults.last?.id {
                         Divider()
@@ -87,6 +93,7 @@ private struct RecentResultRow: View {
     let result: ConversionResult
     let index: Int
     @ObservedObject var model: AppModel
+    let closePanel: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -106,12 +113,15 @@ private struct RecentResultRow: View {
 
             Spacer()
 
+            // Mouse clicks close the panel after copying; keyboard shortcuts keep it open.
             actionButton(.copyText, systemImage: "doc.on.doc", help: "Copy Markdown Text") {
                 model.copyMarkdownText(result)
+                closePanel()
             }
 
             actionButton(.copyFile, systemImage: "doc.badge.arrow.up", help: "Copy Markdown File") {
                 model.copyMarkdownFile(result)
+                closePanel()
             }
 
             actionButton(.reveal, systemImage: "folder", help: "Reveal") {

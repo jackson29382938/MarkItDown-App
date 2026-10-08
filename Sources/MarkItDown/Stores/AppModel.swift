@@ -26,6 +26,7 @@ final class AppModel: ObservableObject {
     private let watchFolderService: WatchFolderService
     private let debugLogService: DebugLogService
     private let recentResultsStore: RecentResultsStore
+    private let snapshotStore: RecentResultSnapshotStore
     private var isDrainingQueue = false
     private var toastTask: Task<Void, Never>?
     private var pendingCombineURLs: [URL] = []
@@ -38,7 +39,8 @@ final class AppModel: ObservableObject {
         fileInputResolver: FileInputResolver = FileInputResolver(),
         watchFolderService: WatchFolderService = WatchFolderService(),
         debugLogService: DebugLogService = DebugLogService(),
-        recentResultsStore: RecentResultsStore = RecentResultsStore()
+        recentResultsStore: RecentResultsStore = RecentResultsStore(),
+        snapshotStore: RecentResultSnapshotStore = RecentResultSnapshotStore()
     ) {
         self.conversionService = conversionService
         self.engineManager = engineManager
@@ -48,10 +50,12 @@ final class AppModel: ObservableObject {
         self.watchFolderService = watchFolderService
         self.debugLogService = debugLogService
         self.recentResultsStore = recentResultsStore
+        self.snapshotStore = snapshotStore
         AppSettings.registerDefaults()
         AppSettings.migrateIfNeeded()
         configureWatchFolderCallbacks()
         recentResults = Array(recentResultsStore.load().prefix(AppSettings.recentResultsLimit))
+        captureMissingSnapshots()
         refreshEngineState()
         restoreWatchFolderFromSettings()
     }
@@ -213,6 +217,7 @@ final class AppModel: ObservableObject {
     func trimRecentResultsToLimit() {
         let limit = AppSettings.recentResultsLimit
         recentResults = Array(recentResults.prefix(limit))
+        snapshotStore.removeAll(except: Set(recentResults.map(\.id)))
         persistRecentResults()
     }
 
@@ -221,7 +226,8 @@ final class AppModel: ObservableObject {
     }
 
     func copyMarkdownText(_ result: ConversionResult) {
-        guard let text = try? String(contentsOf: result.markdownURL, encoding: .utf8) else {
+        guard let source = recentResultSource(for: result),
+              let text = try? String(contentsOf: source, encoding: .utf8) else {
             showToast("Copy failed")
             return
         }
@@ -232,7 +238,8 @@ final class AppModel: ObservableObject {
     }
 
     func copyMarkdownFile(_ result: ConversionResult) {
-        guard PasteboardFileWriter.copyFile(result.markdownURL) else {
+        guard let source = recentResultSource(for: result),
+              PasteboardFileWriter.copyFile(source) else {
             showToast("Copy failed")
             return
         }
@@ -416,9 +423,9 @@ final class AppModel: ObservableObject {
                 engineVersion: runtime.manifest.markitdownVersion,
                 elapsedTime: elapsed
             )
-            recentResults.insert(result, at: 0)
+            prependRecentResult(result)
             for individual in individualResults.reversed() {
-                recentResults.insert(individual, at: 0)
+                prependRecentResult(individual)
             }
             trimRecentResultsToLimit()
 
@@ -471,7 +478,7 @@ final class AppModel: ObservableObject {
                 jobs[index].status = .succeeded
                 jobs[index].completedAt = Date()
                 jobs[index].result = result
-                recentResults.insert(result, at: 0)
+                prependRecentResult(result)
                 trimRecentResultsToLimit()
 
                 if AppSettings.revealAfterConversion {
@@ -565,6 +572,27 @@ final class AppModel: ObservableObject {
 
     private func persistRecentResults() {
         recentResultsStore.save(recentResults)
+    }
+
+    private func prependRecentResult(_ result: ConversionResult) {
+        snapshotStore.capture(result)
+        recentResults.insert(result, at: 0)
+    }
+
+    /// Results saved before snapshots existed get one now, if their output file still exists.
+    private func captureMissingSnapshots() {
+        for result in recentResults where snapshotStore.existingSnapshotURL(for: result) == nil {
+            snapshotStore.capture(result)
+        }
+    }
+
+    /// Prefers the private snapshot so copies survive the output file being moved or deleted.
+    private func recentResultSource(for result: ConversionResult) -> URL? {
+        if let snapshot = snapshotStore.existingSnapshotURL(for: result) {
+            return snapshot
+        }
+        let output = result.markdownURL
+        return FileManager.default.fileExists(atPath: output.path) ? output : nil
     }
 
     private func convertWithWritableFallback(job: ConversionJob, runtime: EngineRuntime) async throws -> ConversionResult {
