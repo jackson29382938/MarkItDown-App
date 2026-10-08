@@ -137,6 +137,16 @@ final class AppModel: ObservableObject {
         drainQueueIfNeeded()
     }
 
+    func chooseCombineFiles() {
+        addCombineFiles(pickFiles())
+    }
+
+    func clearRecentResults() {
+        recentResults.removeAll()
+        snapshotStore.removeAll(except: [])
+        persistRecentResults()
+    }
+
     func addCombineFiles(_ urls: [URL]) {
         let files = fileInputResolver.resolveFiles(from: urls)
         for file in files {

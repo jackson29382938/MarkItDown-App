@@ -85,6 +85,7 @@ enum AppSettings {
     static let notifyOnConversionFailureKey = "notifyOnConversionFailure"
     static let watchFolderEnabledKey = "watchFolderEnabled"
     static let watchFolderPathKey = "watchFolderPath"
+    static let compactPanelKey = "compactPanel"
 
     static let combineDestinationModeKey = "combineDestinationMode"
     static let combineAskDefaultChoiceKey = "combineAskDefaultChoice"
@@ -103,6 +104,7 @@ enum AppSettings {
             notifyOnConversionFailureKey: true,
             watchFolderEnabledKey: false,
             watchFolderPathKey: "",
+            compactPanelKey: false,
             combineDestinationModeKey: CombineDestinationMode.alwaysAsk.rawValue,
             combineAskDefaultChoiceKey: 1,
             combineCustomFolderPathKey: "",
@@ -144,6 +146,10 @@ enum AppSettings {
 
     static var revealAfterConversion: Bool {
         UserDefaults.standard.bool(forKey: revealAfterConversionKey)
+    }
+
+    static var compactPanel: Bool {
+        UserDefaults.standard.bool(forKey: compactPanelKey)
     }
 
     static var notifyOnConversionComplete: Bool {

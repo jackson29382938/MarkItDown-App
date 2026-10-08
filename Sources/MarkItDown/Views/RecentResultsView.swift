@@ -58,15 +58,25 @@ struct RecentResultsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Recent")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Recent")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
 
-                Text("⌘1 copy text · ⌥1 copy file · ⌘⌥1 reveal (1–9)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    Text("⌘1 copy text · ⌥1 copy file · ⌘⌥1 reveal (1–9)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer()
+
+                Button("Clear") {
+                    model.clearRecentResults()
+                }
+                .controlSize(.small)
+                .help("Remove all recent results from the list")
             }
 
             VStack(spacing: 0) {

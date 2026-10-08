@@ -3,6 +3,8 @@ import UniformTypeIdentifiers
 
 struct DropZoneView: View {
     let isConverting: Bool
+    let isCompact: Bool
+    let onChoose: () -> Void
     let onFiles: ([URL]) -> Void
     @State private var isTargeted = false
 
@@ -15,25 +17,37 @@ struct DropZoneView: View {
                 )
                 .background(.quaternary.opacity(isTargeted ? 0.8 : 0.35), in: RoundedRectangle(cornerRadius: 8))
 
-            HStack(spacing: 10) {
-                Image(systemName: isConverting ? "arrow.triangle.2.circlepath" : "square.and.arrow.down")
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(isTargeted ? Color.accentColor : Color.secondary)
-                    .frame(width: 28, height: 28)
+            if isCompact {
+                HStack(spacing: 8) {
+                    Image(systemName: isConverting ? "arrow.triangle.2.circlepath" : "square.and.arrow.down")
+                        .foregroundStyle(isTargeted ? Color.accentColor : Color.secondary)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(isConverting ? "Converting" : "Drop Files or Folders")
-                        .font(.headline)
-                    Text("PDF, Office, HTML, data, ZIP")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text(isConverting ? "Converting" : "Drop files or click to choose")
+                        .font(.subheadline.weight(.semibold))
                 }
+            } else {
+                HStack(spacing: 10) {
+                    Image(systemName: isConverting ? "arrow.triangle.2.circlepath" : "square.and.arrow.down")
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(isTargeted ? Color.accentColor : Color.secondary)
+                        .frame(width: 28, height: 28)
 
-                Spacer()
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(isConverting ? "Converting" : "Drop Files or Folders")
+                            .font(.headline)
+                        Text("PDF, Office, HTML, data, ZIP · click to choose")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+                }
+                .padding(18)
             }
-            .padding(18)
         }
-        .frame(height: 94)
+        .frame(height: isCompact ? 44 : 94)
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .onTapGesture(perform: onChoose)
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isTargeted) { providers in
             loadFileURLs(from: providers)
         }

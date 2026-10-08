@@ -3,6 +3,7 @@ import SwiftUI
 
 struct StatusPanelView: View {
     @ObservedObject var model: AppModel
+    @AppStorage(AppSettings.compactPanelKey) private var compactPanel = false
     let openSettings: () -> Void
     let closePanel: () -> Void
 
@@ -17,21 +18,34 @@ struct StatusPanelView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header
-            DropZoneView(isConverting: model.isConverting && !model.isCombining) { urls in
+        VStack(alignment: .leading, spacing: compactPanel ? 10 : 14) {
+            if compactPanel {
+                compactHeader
+            } else {
+                header
+            }
+
+            DropZoneView(
+                isConverting: model.isConverting && !model.isCombining,
+                isCompact: compactPanel,
+                onChoose: { model.chooseFiles() }
+            ) { urls in
                 model.enqueue(urls: urls)
             }
 
             CombineDropZoneView(
                 items: $model.combineItems,
-                isCombining: model.isCombining
+                isCombining: model.isCombining,
+                isCompact: compactPanel,
+                onChoose: { model.chooseCombineFiles() }
             ) {
                 model.combineFromPanel()
             }
 
-            actionRow
-            watchFolderRow
+            if !compactPanel {
+                actionRow
+                watchFolderRow
+            }
 
             if !model.queueJobs.isEmpty {
                 JobQueueView(model: model)
@@ -41,17 +55,19 @@ struct StatusPanelView: View {
                 RecentResultsView(model: model, closePanel: closePanel)
             }
 
-            if let latestDiagnostic = model.latestDiagnostic {
-                DebugInfoView(entry: latestDiagnostic, model: model)
+            if !compactPanel {
+                if let latestDiagnostic = model.latestDiagnostic {
+                    DebugInfoView(entry: latestDiagnostic, model: model)
+                }
+
+                Divider()
+                updateRow
+
+                Text(shortcutFooter)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
-
-            Divider()
-            updateRow
-
-            Text(shortcutFooter)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .frame(maxWidth: .infinity, alignment: .center)
         }
         .padding(16)
         .frame(width: 420)
@@ -70,6 +86,20 @@ struct StatusPanelView: View {
         let toggle = ShortcutKind.togglePanel.load().displayString
         let choose = ShortcutKind.chooseFiles.load().displayString
         return "\(toggle) toggle · \(choose) choose · Esc to close"
+    }
+
+    private var compactHeader: some View {
+        HStack {
+            Spacer()
+
+            Button {
+                openSettings()
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.borderless)
+            .help("Settings")
+        }
     }
 
     private var header: some View {

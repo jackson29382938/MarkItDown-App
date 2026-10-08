@@ -14,6 +14,8 @@ struct CombineItem: Identifiable, Equatable {
 struct CombineDropZoneView: View {
     @Binding var items: [CombineItem]
     let isCombining: Bool
+    let isCompact: Bool
+    let onChoose: () -> Void
     let onCombine: () -> Void
 
     @State private var isTargeted = false
@@ -29,23 +31,33 @@ struct CombineDropZoneView: View {
                     .background(.quaternary.opacity(isTargeted ? 0.8 : 0.35), in: RoundedRectangle(cornerRadius: 8))
 
                 if items.isEmpty {
-                    HStack(spacing: 10) {
-                        Image(systemName: "rectangle.stack.badge.plus")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundStyle(isTargeted ? Color.accentColor : Color.secondary)
-                            .frame(width: 28, height: 28)
+                    if isCompact {
+                        HStack(spacing: 8) {
+                            Image(systemName: "rectangle.stack.badge.plus")
+                                .foregroundStyle(isTargeted ? Color.accentColor : Color.secondary)
 
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Drop files to combine")
+                            Text("Drop files to combine, or click")
                                 .font(.subheadline.weight(.semibold))
-                            Text("Reorder below, then Combine")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         }
+                    } else {
+                        HStack(spacing: 10) {
+                            Image(systemName: "rectangle.stack.badge.plus")
+                                .font(.system(size: 20, weight: .medium))
+                                .foregroundStyle(isTargeted ? Color.accentColor : Color.secondary)
+                                .frame(width: 28, height: 28)
 
-                        Spacer()
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Drop files to combine")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("Click to choose · reorder below, then Combine")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+                        }
+                        .padding(14)
                     }
-                    .padding(14)
                 } else {
                     List {
                         ForEach(items) { item in
@@ -74,7 +86,12 @@ struct CombineDropZoneView: View {
                     .padding(.vertical, 4)
                 }
             }
-            .frame(minHeight: items.isEmpty ? 72 : nil)
+            .frame(minHeight: items.isEmpty ? (isCompact ? 44 : 72) : nil)
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .onTapGesture {
+                // Only the empty area opens the picker; a populated list keeps its own taps.
+                if items.isEmpty { onChoose() }
+            }
             .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isTargeted) { providers in
                 loadFileURLs(from: providers)
             }

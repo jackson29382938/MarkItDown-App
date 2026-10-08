@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     @AppStorage(AppSettings.revealAfterConversionKey) private var revealAfterConversion = false
+    @AppStorage(AppSettings.compactPanelKey) private var compactPanel = false
     @AppStorage(AppSettings.copyAfterConversionMode) private var autoCopyModeRaw = AutoCopyMode.none.rawValue
     @AppStorage(AppSettings.recentResultsLimitKey) private var recentResultsLimit = 8
     @AppStorage(AppSettings.notifyOnConversionCompleteKey) private var notifyOnConversionComplete = true
@@ -47,6 +48,11 @@ struct SettingsView: View {
             }
 
             Toggle("Reveal after conversion", isOn: $revealAfterConversion)
+
+            Toggle("Compact panel", isOn: $compactPanel)
+            Text("Shows only the drop areas, recent files and Settings.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Picker("Auto-copy after conversion", selection: $autoCopyModeRaw) {
                 ForEach(AutoCopyMode.allCases) { mode in
