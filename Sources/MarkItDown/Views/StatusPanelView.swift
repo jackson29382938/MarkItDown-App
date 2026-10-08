@@ -64,12 +64,25 @@ struct StatusPanelView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: model.toastMessage)
         .onExitCommand(perform: closePanel)
+        .focusable()
+        .focusEffectDisabled()
+        .onKeyPress(.return, phases: .down) { press in
+            guard let latest = model.recentResults.first else { return .ignored }
+            if press.modifiers.contains(.shift) {
+                model.copyMarkdownFile(latest)
+            } else {
+                model.copyMarkdownText(latest)
+            }
+            return .handled
+        }
     }
 
     private var shortcutFooter: String {
         let toggle = ShortcutKind.togglePanel.load().displayString
         let choose = ShortcutKind.chooseFiles.load().displayString
-        return "\(toggle) toggle · \(choose) choose · Esc to close"
+        let base = "\(toggle) toggle · \(choose) choose · Esc to close"
+        guard !model.recentResults.isEmpty else { return base }
+        return "\(base) · ↩ copy text · ⇧↩ copy file"
     }
 
     private var header: some View {
