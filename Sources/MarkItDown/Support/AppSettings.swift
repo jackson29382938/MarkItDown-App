@@ -86,6 +86,8 @@ enum AppSettings {
     static let watchFolderEnabledKey = "watchFolderEnabled"
     static let watchFolderPathKey = "watchFolderPath"
     static let compactPanelKey = "compactPanel"
+    static let panelPlacementKey = "panelPlacement"
+    static let panelCustomRegionKey = "panelCustomRegion"
 
     static let combineDestinationModeKey = "combineDestinationMode"
     static let combineAskDefaultChoiceKey = "combineAskDefaultChoice"
@@ -105,6 +107,7 @@ enum AppSettings {
             watchFolderEnabledKey: false,
             watchFolderPathKey: "",
             compactPanelKey: false,
+            panelPlacementKey: PanelPlacement.statusItem.rawValue,
             combineDestinationModeKey: CombineDestinationMode.alwaysAsk.rawValue,
             combineAskDefaultChoiceKey: 1,
             combineCustomFolderPathKey: "",
@@ -150,6 +153,16 @@ enum AppSettings {
 
     static var compactPanel: Bool {
         UserDefaults.standard.bool(forKey: compactPanelKey)
+    }
+
+    static var panelPlacement: PanelPlacement {
+        PanelPlacement(rawValue: UserDefaults.standard.string(forKey: panelPlacementKey) ?? "") ?? .statusItem
+    }
+
+    /// The selected screen area in global AppKit coordinates, or nil if none has been selected.
+    static var panelCustomRegion: CGRect? {
+        guard let data = UserDefaults.standard.data(forKey: panelCustomRegionKey) else { return nil }
+        return try? JSONDecoder().decode(CGRect.self, from: data)
     }
 
     static var notifyOnConversionComplete: Bool {

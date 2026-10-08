@@ -17,6 +17,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private var escapeMonitor: Any?
     private var globalEscapeMonitor: Any?
     private var panelShortcutMonitor: Any?
+    private var floatingPanel: FloatingPanel?
+    private var floatingHosting: NSHostingController<StatusPanelView>?
     private var heartbeatTimer: Timer?
     private var workspaceObservers: [(NotificationCenter, NSObjectProtocol)] = []
 
@@ -39,6 +41,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     func stop() {
         removeEscapeMonitor()
         removePanelShortcutMonitor()
+        floatingPanel?.orderOut(nil)
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
         workspaceObservers.forEach { center, token in
@@ -63,16 +66,16 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     func restoreAndShowPanel() {
         recreateStatusItem(reason: "app reopen")
-        showPopover()
+        showPanel()
     }
 
     func togglePanel() {
-        popover.isShown ? closePopover() : showPopover()
+        isPanelShown ? closePanel() : showPanel()
     }
 
     func chooseFilesViaShortcut() {
-        if popover.isShown {
-            closePopover()
+        if isPanelShown {
+            closePanel()
         }
 
         NSApp.activate(ignoringOtherApps: true)
@@ -80,7 +83,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         guard !urls.isEmpty else { return }
 
         model.enqueue(urls: urls)
-        showPopover()
+        showPanel()
     }
 
     func refreshTooltip() {
@@ -109,19 +112,33 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         popover.behavior = .applicationDefined
         popover.animates = true
         popover.delegate = self
-        popover.contentViewController = NSHostingController(
-            rootView: StatusPanelView(
-                model: model,
-                openSettings: { [weak self] in self?.openSettings() },
-                closePanel: { [weak self] in self?.closePopover() }
-            )
+        popover.contentViewController = NSHostingController(rootView: makePanelRootView())
+    }
+
+    private func makePanelRootView() -> StatusPanelView {
+        StatusPanelView(
+            model: model,
+            openSettings: { [weak self] in self?.openSettings() },
+            closePanel: { [weak self] in self?.closePanel() }
         )
+    }
+
+    private var isPanelShown: Bool {
+        floatingPanel?.isVisible == true || popover.isShown
+    }
+
+    private var currentPanelWindow: NSWindow? {
+        if floatingPanel?.isVisible == true {
+            return floatingPanel
+        }
+        return popover.contentViewController?.view.window
     }
 
     private func observeModel() {
         modelObserver = model.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async {
                 self?.updateStatusPresentation()
+                self?.refreshFloatingPanelLayout()
             }
         }
     }
@@ -245,23 +262,99 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         )
     }
 
-    private func showPopover() {
+    private func showPanel() {
         restoreStatusItem()
-        guard let button = statusItem?.button else {
-            logger.error("Cannot show panel because the status item button is missing")
-            return
-        }
         updateStatusPresentation()
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        popover.contentViewController?.view.window?.makeKey()
+
+        if AppSettings.panelPlacement == .customArea, let region = AppSettings.panelCustomRegion {
+            showFloatingPanel(in: region)
+        } else {
+            guard let button = statusItem?.button else {
+                logger.error("Cannot show panel because the status item button is missing")
+                return
+            }
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
+        }
+
         installEscapeMonitor()
         installPanelShortcutMonitor()
     }
 
-    private func closePopover() {
+    private func closePanel() {
         popover.performClose(nil)
+        floatingPanel?.orderOut(nil)
         removeEscapeMonitor()
         removePanelShortcutMonitor()
+        restoreStatusItem()
+    }
+
+    private func showFloatingPanel(in region: CGRect) {
+        let panel = floatingPanel ?? makeFloatingPanel()
+        layoutFloatingPanel(in: region)
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    private func makeFloatingPanel() -> FloatingPanel {
+        let hosting = NSHostingController(rootView: makePanelRootView())
+        let panel = FloatingPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 300),
+            styleMask: [.borderless, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = .statusBar
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        // Matches the popover's translucent look.
+        let background = NSVisualEffectView()
+        background.material = .popover
+        background.blendingMode = .behindWindow
+        background.state = .active
+        background.wantsLayer = true
+        background.layer?.cornerRadius = 10
+        background.layer?.masksToBounds = true
+
+        hosting.view.translatesAutoresizingMaskIntoConstraints = false
+        background.addSubview(hosting.view)
+        NSLayoutConstraint.activate([
+            hosting.view.leadingAnchor.constraint(equalTo: background.leadingAnchor),
+            hosting.view.trailingAnchor.constraint(equalTo: background.trailingAnchor),
+            hosting.view.topAnchor.constraint(equalTo: background.topAnchor),
+            hosting.view.bottomAnchor.constraint(equalTo: background.bottomAnchor)
+        ])
+        panel.contentView = background
+
+        floatingHosting = hosting
+        floatingPanel = panel
+        return panel
+    }
+
+    /// Places the panel inside the selected area, anchored at its top-left corner.
+    /// The panel is kept on the visible screen if the area sits near an edge.
+    private func layoutFloatingPanel(in region: CGRect) {
+        guard let panel = floatingPanel, let hosting = floatingHosting else { return }
+
+        let size = hosting.view.fittingSize
+        let screenFrame = NSScreen.screens.first(where: { $0.frame.intersects(region) })?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? region
+
+        let x = min(max(region.minX, screenFrame.minX), screenFrame.maxX - size.width)
+        let y = min(max(region.maxY - size.height, screenFrame.minY), screenFrame.maxY - size.height)
+        panel.setFrame(CGRect(x: x, y: y, width: size.width, height: size.height), display: true)
+    }
+
+    /// Keeps the floating panel's top-left corner fixed while its height changes (for example, when recents grow).
+    private func refreshFloatingPanelLayout() {
+        guard floatingPanel?.isVisible == true, let region = AppSettings.panelCustomRegion else { return }
+        layoutFloatingPanel(in: region)
     }
 
     /// A local monitor only receives events sent to MarkItDown, so while another app
@@ -284,8 +377,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     /// Returns true when the event was a recent-file shortcut and was handled.
     private func handlePanelShortcut(_ event: NSEvent) -> Bool {
-        guard popover.isShown,
-              let panelWindow = popover.contentViewController?.view.window,
+        guard isPanelShown,
+              let panelWindow = currentPanelWindow,
               event.window === panelWindow,
               let match = RecentResultShortcut.match(event),
               match.row < model.recentResults.count else {
@@ -305,7 +398,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     private func openSettings() {
-        closePopover()
+        closePanel()
         settingsWindowController.show()
     }
 
@@ -313,15 +406,15 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         guard escapeMonitor == nil, globalEscapeMonitor == nil else { return }
 
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, event.keyCode == 53, self.popover.isShown else { return event }
-            self.closePopover()
+            guard let self, event.keyCode == 53, self.isPanelShown else { return event }
+            self.closePanel()
             return nil
         }
 
         globalEscapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, event.keyCode == 53, self.popover.isShown else { return }
+            guard let self, event.keyCode == 53, self.isPanelShown else { return }
             Task { @MainActor in
-                self.closePopover()
+                self.closePanel()
             }
         }
     }

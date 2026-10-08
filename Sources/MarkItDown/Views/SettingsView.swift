@@ -5,6 +5,8 @@ struct SettingsView: View {
     @ObservedObject var model: AppModel
     @AppStorage(AppSettings.revealAfterConversionKey) private var revealAfterConversion = false
     @AppStorage(AppSettings.compactPanelKey) private var compactPanel = false
+    @AppStorage(AppSettings.panelPlacementKey) private var panelPlacementRaw = PanelPlacement.statusItem.rawValue
+    @AppStorage(AppSettings.panelCustomRegionKey) private var panelRegionData = Data()
     @AppStorage(AppSettings.copyAfterConversionMode) private var autoCopyModeRaw = AutoCopyMode.none.rawValue
     @AppStorage(AppSettings.recentResultsLimitKey) private var recentResultsLimit = 8
     @AppStorage(AppSettings.notifyOnConversionCompleteKey) private var notifyOnConversionComplete = true
@@ -34,6 +36,13 @@ struct SettingsView: View {
         }
     }
 
+    private var panelRegionDescription: String {
+        guard let rect = try? JSONDecoder().decode(CGRect.self, from: panelRegionData) else {
+            return "Not selected"
+        }
+        return "\(Int(rect.width)) × \(Int(rect.height)) at \(Int(rect.minX)), \(Int(rect.minY))"
+    }
+
     private var generalTab: some View {
         Form {
             Toggle("Launch at login", isOn: $launchAtLogin)
@@ -53,6 +62,34 @@ struct SettingsView: View {
             Text("Shows only the drop areas, recent files and Settings.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Picker("Panel position", selection: $panelPlacementRaw) {
+                Text("Under menu bar icon").tag(PanelPlacement.statusItem.rawValue)
+                Text("Custom area of screen").tag(PanelPlacement.customArea.rawValue)
+            }
+
+            if panelPlacementRaw == PanelPlacement.customArea.rawValue {
+                LabeledContent("Area") {
+                    HStack {
+                        Text(panelRegionDescription)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Button("Select…") {
+                            PanelAreaSelector.shared.begin { rect in
+                                guard let rect,
+                                      let data = try? JSONEncoder().encode(rect) else { return }
+                                panelRegionData = data
+                            }
+                        }
+                        .controlSize(.small)
+                    }
+                }
+
+                Text("Drag a rectangle on the screen. The panel opens inside it, from its top-left corner. Without a selected area, the panel opens under the menu bar icon.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Picker("Auto-copy after conversion", selection: $autoCopyModeRaw) {
                 ForEach(AutoCopyMode.allCases) { mode in
