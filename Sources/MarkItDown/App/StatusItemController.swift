@@ -47,6 +47,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     func restoreStatusItem() {
+        // Recreating the status item removes the button the panel is anchored to,
+        // which closes the panel. Defer until it closes (see popoverDidClose).
+        guard !popover.isShown else { return }
+
         guard statusItem?.button == nil || statusItem?.isVisible == false else {
             updateStatusPresentation()
             return
@@ -291,6 +295,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     func popoverDidClose(_ notification: Notification) {
         removeEscapeMonitor()
+        restoreStatusItem()
     }
 
     private func removeStatusItem() {
@@ -309,6 +314,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     private func restoreStatusItemIfNeededWithoutRecursing() {
+        guard !popover.isShown else { return }
+
         guard statusItem == nil || statusItem?.button == nil || statusItem?.isVisible == false else {
             return
         }
