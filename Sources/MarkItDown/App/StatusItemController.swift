@@ -16,6 +16,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private var modelObserver: AnyCancellable?
     private var escapeMonitor: Any?
     private var globalEscapeMonitor: Any?
+    private var panelShortcutMonitor: Any?
     private var heartbeatTimer: Timer?
     private var workspaceObservers: [(NotificationCenter, NSObjectProtocol)] = []
 
@@ -37,6 +38,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     func stop() {
         removeEscapeMonitor()
+        removePanelShortcutMonitor()
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
         workspaceObservers.forEach { center, token in
@@ -253,11 +255,53 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
         installEscapeMonitor()
+        installPanelShortcutMonitor()
     }
 
     private func closePopover() {
         popover.performClose(nil)
         removeEscapeMonitor()
+        removePanelShortcutMonitor()
+    }
+
+    /// A local monitor only receives events sent to MarkItDown, so while another app
+    /// is active these keys go to that app untouched.
+    private func installPanelShortcutMonitor() {
+        guard panelShortcutMonitor == nil else { return }
+
+        panelShortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.handlePanelShortcut(event) else { return event }
+            return nil
+        }
+    }
+
+    private func removePanelShortcutMonitor() {
+        if let panelShortcutMonitor {
+            NSEvent.removeMonitor(panelShortcutMonitor)
+            self.panelShortcutMonitor = nil
+        }
+    }
+
+    /// Returns true when the event was a recent-file shortcut and was handled.
+    private func handlePanelShortcut(_ event: NSEvent) -> Bool {
+        guard popover.isShown,
+              let panelWindow = popover.contentViewController?.view.window,
+              event.window === panelWindow,
+              let match = RecentResultShortcut.match(event),
+              match.row < model.recentResults.count else {
+            return false
+        }
+
+        let result = model.recentResults[match.row]
+        switch match.action {
+        case .copyText:
+            model.copyMarkdownText(result)
+        case .copyFile:
+            model.copyMarkdownFile(result)
+        case .reveal:
+            model.reveal(result.markdownURL)
+        }
+        return true
     }
 
     private func openSettings() {
@@ -295,6 +339,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     func popoverDidClose(_ notification: Notification) {
         removeEscapeMonitor()
+        removePanelShortcutMonitor()
         restoreStatusItem()
     }
 

@@ -1,7 +1,11 @@
+import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 /// Keyboard shortcuts for the first nine recent files, most recent first.
 /// ⌘n copies the text, ⌥n copies the file, ⌘⌥n reveals it in Finder.
+/// These are handled by a local event monitor in StatusItemController, not by
+/// SwiftUI key equivalents, so they never reach other apps.
 enum RecentResultShortcut {
     static let maxRows = 9
 
@@ -9,14 +13,6 @@ enum RecentResultShortcut {
         case copyText
         case copyFile
         case reveal
-
-        var keyModifiers: EventModifiers {
-            switch self {
-            case .copyText: return .command
-            case .copyFile: return .option
-            case .reveal: return [.command, .option]
-            }
-        }
 
         var symbols: String {
             switch self {
@@ -27,9 +23,27 @@ enum RecentResultShortcut {
         }
     }
 
-    static func keyEquivalent(forRow index: Int) -> KeyEquivalent? {
-        guard index < maxRows else { return nil }
-        return KeyEquivalent(Character(String(index + 1)))
+    private static let digitKeyCodes: [UInt16: Int] = [
+        UInt16(kVK_ANSI_1): 0, UInt16(kVK_ANSI_2): 1, UInt16(kVK_ANSI_3): 2,
+        UInt16(kVK_ANSI_4): 3, UInt16(kVK_ANSI_5): 4, UInt16(kVK_ANSI_6): 5,
+        UInt16(kVK_ANSI_7): 6, UInt16(kVK_ANSI_8): 7, UInt16(kVK_ANSI_9): 8
+    ]
+
+    /// Maps a key event to an action and row index, requiring exactly the expected modifiers.
+    static func match(_ event: NSEvent) -> (action: Action, row: Int)? {
+        guard let row = digitKeyCodes[event.keyCode] else { return nil }
+
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        switch modifiers {
+        case [.command]:
+            return (.copyText, row)
+        case [.option]:
+            return (.copyFile, row)
+        case [.command, .option]:
+            return (.reveal, row)
+        default:
+            return nil
+        }
     }
 
     static func label(_ action: Action, forRow index: Int) -> String? {
@@ -116,7 +130,7 @@ private struct RecentResultRow: View {
         perform: @escaping () -> Void
     ) -> some View {
         let shortcutLabel = RecentResultShortcut.label(action, forRow: index)
-        let button = Button(action: perform) {
+        Button(action: perform) {
             VStack(spacing: 1) {
                 Image(systemName: systemImage)
                 if let shortcutLabel {
@@ -129,11 +143,5 @@ private struct RecentResultRow: View {
         }
         .buttonStyle(.borderless)
         .help(shortcutLabel.map { "\(help) (\($0))" } ?? help)
-
-        if let key = RecentResultShortcut.keyEquivalent(forRow: index) {
-            button.keyboardShortcut(key, modifiers: action.keyModifiers)
-        } else {
-            button
-        }
     }
 }
